@@ -48,6 +48,9 @@ namespace MailArchiver.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("FullSyncIntervalHours")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("ImapPort")
                         .HasColumnType("integer");
 
@@ -60,6 +63,9 @@ namespace MailArchiver.Migrations
                     b.Property<DateTime>("LastSync")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("LastFullSync")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int?>("LocalRetentionDays")
                         .HasColumnType("integer");
 
@@ -67,12 +73,24 @@ namespace MailArchiver.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("OAuthAccessToken")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OAuthRefreshToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("OAuthTokenExpiry")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("Password")
                         .HasColumnType("text");
 
                     b.Property<string>("Provider")
                         .HasMaxLength(10)
                         .HasColumnType("text");
+
+                    b.Property<int?>("SyncIntervalMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<string>("TenantId")
                         .HasColumnType("text");
@@ -568,6 +586,52 @@ namespace MailArchiver.Migrations
                     b.ToTable("SyncCheckpoints", "mail_archiver");
                 });
 
+            modelBuilder.Entity("MailArchiver.Models.AccountStorageCache", b =>
+                {
+                    b.Property<int>("MailAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("AttachmentBytes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("MailBytes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("TotalBytes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("MailAccountId");
+
+                    b.ToTable("AccountStorageCache", "mail_archiver");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.AccountStorageBackfillState", b =>
+                {
+                    b.Property<int>("MailAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("Pending");
+
+                    b.HasKey("MailAccountId");
+
+                    b.ToTable("AccountStorageBackfillState", "mail_archiver");
+                });
+
             modelBuilder.Entity("MailArchiver.Models.BandwidthUsage", b =>
                 {
                     b.HasOne("MailArchiver.Models.MailAccount", "MailAccount")
@@ -584,6 +648,28 @@ namespace MailArchiver.Migrations
                     b.HasOne("MailArchiver.Models.MailAccount", "MailAccount")
                         .WithMany()
                         .HasForeignKey("MailAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MailAccount");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.AccountStorageCache", b =>
+                {
+                    b.HasOne("MailAccount", "MailAccount")
+                        .WithOne()
+                        .HasForeignKey("MailArchiver.Models.AccountStorageCache", "MailAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MailAccount");
+                });
+
+            modelBuilder.Entity("MailArchiver.Models.AccountStorageBackfillState", b =>
+                {
+                    b.HasOne("MailAccount", "MailAccount")
+                        .WithOne()
+                        .HasForeignKey("MailArchiver.Models.AccountStorageBackfillState", "MailAccountId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

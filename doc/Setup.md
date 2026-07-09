@@ -40,6 +40,9 @@ services:
       - MailSync__CommandTimeoutSeconds=300
       - MailSync__AlwaysForceFullSync=false
       - MailSync__IgnoreSelfSignedCert=false
+      - MailSync__MaxConcurrentSyncs=1
+      - MailSync__InterAccountDelaySeconds=0
+      - MailSync__FullSyncIntervalHours=24
 
       # BatchRestore Settings
       - BatchRestore__AsyncThreshold=50
@@ -47,6 +50,9 @@ services:
       - BatchRestore__MaxAsyncEmails=50000
       - BatchRestore__SessionTimeoutMinutes=30
       - BatchRestore__DefaultBatchSize=50
+
+      # Tenant Management Settings
+      - TenantManagement__MaxSelectedMailboxes=1000
 
       # BatchOperation Settings
       - BatchOperation__BatchSize=50
@@ -78,6 +84,10 @@ services:
       # Local Import Settings (for CLI imports from mounted volumes)
       - LocalImport__AllowedPaths__0=/data/import
 
+      # CSV Import Settings (for bulk IMAP account import)
+      - CsvImport__MaxRows=5000
+      - CsvImport__MaxFileSizeBytes=10000000
+
       # TimeZone Settings
       - TimeZone__DisplayTimeZoneId=Etc/UCT
 
@@ -91,6 +101,13 @@ services:
       - AttachmentDeduplication__DelayBetweenBatchesMs=0
       - AttachmentDeduplication__StartupDelaySeconds=20
       - AttachmentDeduplication__OrphanCleanupIntervalHours=12
+      - AttachmentDeduplication__CommandTimeoutSeconds=300
+
+      # Account Storage Settings (Optional - per-account storage display)
+      - AccountStorage__Enabled=true
+      - AccountStorage__DailyExecutionTime=02:30
+      - AccountStorage__BackfillDelayMs=5000
+      - AccountStorage__RefreshBatchDelayMs=1000
 
       # ReleaseNotes Settings (Version Update Splash Screen)
       - ReleaseNotes__Enabled=true
@@ -108,6 +125,7 @@ services:
       - OAuth__Authority=https://example.com
       - OAuth__ClientId=YOUR-CLIENT-ID
       - OAuth__ClientSecret=YOUR-CLIENT-SECRET
+      - OAuth__DisplayName=PocketID SSO
       - OAuth__ClientScopes__0=openid
       - OAuth__ClientScopes__1=profile
       - OAuth__ClientScopes__2=email
@@ -197,12 +215,15 @@ docker compose restart
   - `None`: Cookies are sent with all requests. Requires HTTPS and the `Secure` attribute. Only use this if you have specific cross-site requirements and understand the security implications.
   
 ### 📨 MailSync Settings
-- `MailSync__IntervalMinutes`: The interval in minutes between email synchronization.
+- `MailSync__IntervalMinutes`: The interval in minutes between email synchronization. This is the global default; each account can override it individually from the Create/Edit page (leave empty to use this default).
+- `MailSync__FullSyncIntervalHours`: Optional global default for automatic full resyncs, in hours. When unset (the default), no automatic full sync runs unless a per-account `FullSyncIntervalHours` value is set on the Create/Edit page. Per-account values override this global default.
 - `MailSync__TimeoutMinutes`: The timeout for the sync operation in minutes.
 - `MailSync__ConnectionTimeoutSeconds`: The connection timeout for IMAP connections in seconds.
 - `MailSync__CommandTimeoutSeconds`: The command timeout for IMAP commands in seconds.
 - `MailSync__AlwaysForceFullSync`: Whether to always force a full sync (true/false).
 - `MailSync__IgnoreSelfSignedCert`: Whether to ignore self-signed certificates (true/false).
+- `MailSync__MaxConcurrentSyncs`: Maximum number of account syncs that may run in parallel within one poll cycle. Default `1` (sequential, backwards-compatible). Increase to sync multiple accounts concurrently — keep in mind provider rate limits and local resource usage.
+- `MailSync__InterAccountDelaySeconds`: Optional stagger delay in seconds applied at the end of each account sync task. Default `0` (no delay). Useful to avoid burst-starts when `MaxConcurrentSyncs > 1`.
 
 ### 📤 BatchRestore Settings
 - `BatchRestore__AsyncThreshold`: The number of emails that triggers async processing.
@@ -210,6 +231,9 @@ docker compose restart
 - `BatchRestore__MaxAsyncEmails`: The maximum number of emails for async processing.
 - `BatchRestore__SessionTimeoutMinutes`: The session timeout for batch restore in minutes.
 - `BatchRestore__DefaultBatchSize`: The default batch size for email operations.
+
+### 🏢 Tenant Management Settings
+- `TenantManagement__MaxSelectedMailboxes`: Maximum number of mailboxes that can be added in a single Tenant Management operation. Default is `1000`. Increase this for very large tenants, or lower it to prevent accidental mass imports. When the limit is exceeded, the operation is rejected with a validation error and no accounts are created. See [M365 Tenant Import Guide](M365TenantImport.md) for details.
 
 ### 📦 BatchOperation Settings
 - `BatchOperation__BatchSize`: The batch size for email operations.
@@ -257,12 +281,17 @@ docker compose restart
 - `Upload__KeepAliveTimeoutHours`: The keep alive timeout for uploads in hours.
 - `Upload__RequestHeadersTimeoutHours`: The timeout for request headers in hours.
 
-### 📥 Local Import Settings
+### 📂 Local Import Settings
 - `LocalImport__AllowedPaths__0`, `LocalImport__AllowedPaths__1`, etc.: Whitelist of local directories that the CLI import commands (`--import-mbox`, `--import-eml`) are allowed to read files from. Each entry is a path inside the container. You must mount your import files into one of these directories using Docker volumes. Default: `/data/import` (automatically set to `/app/uploads` as fallback).
   - When using `docker exec` to run the import command, the file path provided via `--file` must be within one of these allowed paths.
   - This security measure prevents arbitrary file system access from CLI commands.
   - Multiple paths can be configured for different import sources.
   - See [CLI Local Import Guide](CLI-Local-Import.md) for detailed usage instructions.
+
+### 📄 CSV Import Settings
+- `CsvImport__MaxRows`: Maximum number of CSV rows (mailboxes) processed in a single bulk import. Default is `5000`. Increase this value for very large deployments; lower it to limit the impact of a single import run on database load.
+- `CsvImport__MaxFileSizeBytes`: Maximum allowed size (in bytes) of the uploaded CSV file. Default is `10000000` (10 MB). Adjust this value to match your upload limits if needed.
+- See [Account Import Guide](Account%20Import.md) for detailed usage instructions on bulk IMAP account import via CSV.
 
 ### 🕐 TimeZone Settings
 - `TimeZone__DisplayTimeZoneId`: The time zone used for displaying email timestamps in the UI. Uses IANA time zone identifiers (e.g., "Europe/Berlin", "Asia/Tokyo"). Default is "Etc/UCT" for backward compatibility. When importing emails timestamps will be converted to this time zone for display purposes.
@@ -282,10 +311,20 @@ Attachment deduplication stores every unique attachment payload only once (conte
 - `AttachmentDeduplication__DelayBetweenBatchesMs`: Optional pause (in milliseconds) between migration batches to throttle database load on busy systems. Default is `0` (no pause).
 - `AttachmentDeduplication__StartupDelaySeconds`: Delay (in seconds) after application start before the background migration begins, giving the schema migration time to complete. Default is `20`.
 - `AttachmentDeduplication__OrphanCleanupIntervalHours`: Interval (in hours) of the always-on garbage collection that removes attachment payloads no longer referenced by any email. Default is `12`. This runs independently of `DatabaseMaintenance__Enabled`.
+- `AttachmentDeduplication__CommandTimeoutSeconds`: Database command timeout (in seconds) for the migration batch operations (INSERT with SHA-256 hashing and UPDATE). Default is `300` (5 minutes). Increase this value for very large databases or attachments, or lower it if you want faster failure detection. If a batch still times out, the service automatically retries with half the batch size.
+
+### 💾 Account Storage Settings
+The per-account storage display shows the database storage usage (all mail fields + attachments) for each account in the Dashboard "Account Overview" table and the MailAccounts "Show All" table. An autark background service (`AccountStorageRefreshService`) computes the values via PostgreSQL `pg_column_size` on the entire row (covering all fields of a mail) and caches them in the `AccountStorageCache` table. This service runs independently of `DatabaseMaintenance__Enabled`.
+
+- `AccountStorage__Enabled`: Enable or disable the storage refresh service (true/false). Default is `true`. When enabled, the service performs a resumable backfill of pending accounts on startup (crash-safe via `AccountStorageBackfillState`) and a daily full refresh thereafter. When disabled, storage values are only updated when emails are synced, imported, or deleted, but the displayed values may become stale over time.
+- `AccountStorage__DailyExecutionTime`: Time of day (24-hour format `HH:mm`) for the daily full refresh of all accounts. Default is `02:30`. Choose a time during low system activity.
+- `AccountStorage__BackfillDelayMs`: Delay (in milliseconds) between accounts during the initial backfill on startup. Default is `5000`. Lower values speed up the backfill but increase database load; raise this value for very large archives to avoid overloading the database.
+- `AccountStorage__RefreshBatchDelayMs`: Delay (in milliseconds) between accounts during the daily full refresh. Default is `1000`. Lower values speed up the refresh but increase database load; raise this value for very large archives.
+
+> 💡 **Note**: Storage values are refreshed immediately after each mail sync, import, or retention deletion, so the displayed values stay current even without the daily refresh. The daily refresh is a safety net that catches edge cases (e.g., direct database changes).
 
 
-### Logging Settings
-
+### 📝 Logging Settings
 - `Logging__LogLevel__Default`: The default log level for the application. Available levels are: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None`. Default is `Information`.
 - `Logging__LogLevel__Microsoft_AspNetCore`: Log level for ASP.NET Core framework messages. Default is `Warning`.
 - `Logging__LogLevel__Microsoft_EntityFrameworkCore_Database_Command`: Log level for Entity Framework database commands. Default is `Warning`.
@@ -302,9 +341,11 @@ For detailed setup instructions for OpenID Connect authentication, see [OIDC Imp
 - `OAuth__Authority`: The OpenID Connect authority URL (e.g., https://sts.windows.net/{TENANT-ID}/ for Azure AD)
 - `OAuth__ClientId`: The client ID assigned by your identity provider
 - `OAuth__ClientSecret`: The client secret assigned by your identity provider
+- `OAuth__DisplayName`: Optional display name shown on the OIDC login button and auto-redirect page (e.g., `PocketID SSO`). If omitted, the generic "Login with OAuth" label is used.
 - `OAuth__ClientScopes__0`: First scope requested from the identity provider (openid)
 - `OAuth__ClientScopes__1`: Second scope requested from the identity provider (profile)
 - `OAuth__ClientScopes__2`: Third scope requested from the identity provider (email)
+- `OAuth__AutoApproveUsers`: Automatically approve new OIDC users without requiring manual admin approval (true/false). Default is `false`.
 
 #### User Provisioning Settings
 - `OAuth__AutoApproveUsers`: Automatically approve new OIDC users without requiring manual admin approval (true/false). Default is `false`. When enabled, users who authenticate via the OIDC provider are immediately activated and can access the application. When disabled (default), new OIDC users are created as inactive and require manual activation by an administrator. See [Auto-Approve OIDC Users](OIDC_Implementation.md#auto-approve-oidc-users) for detailed information.
@@ -321,6 +362,7 @@ environment:
   - OAuth__Authority=https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0
   - OAuth__ClientId=your-client-id
   - OAuth__ClientSecret=your-client-secret
+  - OAuth__DisplayName=PocketID SSO
   - OAuth__ClientScopes__0=openid
   - OAuth__ClientScopes__1=profile
   - OAuth__ClientScopes__2=email
@@ -376,6 +418,97 @@ volumes:
 - `Kestrel__Endpoints__Https__Certificate__Password`: Password for the PFX certificate file
 
 > 💡 **Note**: This configuration is optional. If you're using a reverse proxy with HTTPS (recommended), the communication between reverse proxy and application can remain HTTP. However, for maximum security in sensitive environments, you may want to enable HTTPS on Kestrel as well to encrypt the entire communication path.
+
+## 🔑 Secrets Management for Production
+
+Hardcoding sensitive data such as database passwords, admin credentials, and OAuth client secrets directly in `docker-compose.yml` is a security risk, especially when the file is checked into version control. The recommended approach is to externalize these values into a `.env` file that Docker Compose loads automatically.
+
+### 📄 The `.env` File
+
+Create a `.env` file in the same directory as your `docker-compose.yml` with the following content:
+
+```env
+# Database
+POSTGRES_PASSWORD=YourSecureDBPassword123!
+
+# Admin Account
+AUTH_USERNAME=admin
+AUTH_PASSWORD=YourSecureAdminPassword456!
+
+# OIDC / OAuth Secrets
+OAUTH_CLIENT_SECRET=YourOAuthClientSecret
+
+# Kestrel HTTPS (optional)
+KESTREL_CERT_PASSWORD=YourCertPassword
+```
+
+**Important**: Docker Compose automatically reads the `.env` file from the same directory — you do **not** need to reference it manually. All variables defined in `.env` are available in `docker-compose.yml` via the `${VARIABLE_NAME}` syntax.
+
+### 🐳 Adapted `docker-compose.yml`
+
+The `docker-compose.yml` from the installation steps should be adapted to use placeholders instead of hardcoded secrets:
+
+```yaml
+services:
+  mailarchive-app:
+    image: s1t5/mailarchiver:latest
+    restart: always
+    environment:
+      # Database Connection
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MailArchiver;Username=mailuser;Password=${POSTGRES_PASSWORD}
+
+      # Authentication Settings
+      - Authentication__Username=${AUTH_USERNAME}
+      - Authentication__Password=${AUTH_PASSWORD}
+      # ... other settings remain unchanged ...
+
+      # OIDC Configuration
+      - OAuth__ClientSecret=${OAUTH_CLIENT_SECRET}
+    # ... ports, volumes, networks ...
+
+  postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: MailArchiver
+      POSTGRES_USER: mailuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # ... volumes, networks ...
+```
+
+### 📋 `.env.example` Template for Administrators
+
+Create a `.env.example` file in your repository that serves as a template for other administrators. It contains placeholder values and documentation but **no real secrets**:
+
+```env
+# ============================================
+# Mail Archiver - Environment Configuration
+# ============================================
+# Copy this file to .env and fill in your values.
+# Never commit the actual .env file to version control!
+
+# --- PostgreSQL ---
+POSTGRES_PASSWORD=change_me_db_password
+
+# --- Admin Account ---
+AUTH_USERNAME=admin
+AUTH_PASSWORD=change_me_admin_password
+
+# --- OIDC / OAuth ---
+OAUTH_CLIENT_SECRET=change_me_client_secret
+
+#...and so on
+```
+
+### ✅ Best Practices
+
+- **Use `.env.example` as a template**
+- **Set strict file permissions** — Restrict access to the `.env` file:
+  ```bash
+  chmod 600 .env
+  ```
+- **Use strong passwords** — Generate long, random passwords (at least 16 characters) with a mix of letters, numbers, and special characters.
+- **Limit `.env` file access** — Only the user running Docker Compose should have read permissions to the `.env` file.
 
 ## 🔒 Security Notes
 

@@ -115,6 +115,10 @@ builder.Services.Configure<BatchRestoreOptions>(
 builder.Services.Configure<BatchOperationOptions>(
     builder.Configuration.GetSection(BatchOperationOptions.BatchOperation));
 
+// Add Tenant Management Options
+builder.Services.Configure<TenantManagementOptions>(
+    builder.Configuration.GetSection(TenantManagementOptions.TenantManagement));
+
 // Add Mail Sync Options
 builder.Services.Configure<MailSyncOptions>(
     builder.Configuration.GetSection(MailSyncOptions.MailSync));
@@ -152,6 +156,14 @@ builder.Services.AddScoped<MailArchiver.Utilities.DateTimeHelper>();
 
 // Add HTTP Client factory (used by VersionUpdateService for GitHub API calls)
 builder.Services.AddHttpClient("GitHubReleases");
+builder.Services.AddHttpClient("MsaOAuth");
+
+// Register CSV import options for bulk IMAP account import
+builder.Services.Configure<CsvImportOptions>(builder.Configuration.GetSection(CsvImportOptions.CsvImport));
+
+// Register MSA OAuth options and service for personal Microsoft accounts
+builder.Services.Configure<MsaOAuthOptions>(builder.Configuration.GetSection(MsaOAuthOptions.SectionName));
+builder.Services.AddScoped<MailArchiver.Services.IMsaOAuthService, MailArchiver.Services.MsaOAuthService>();
 
 // Add Session support
 builder.Services.AddDistributedMemoryCache();
@@ -375,6 +387,11 @@ builder.Services.AddHostedService<DatabaseMaintenanceService>(provider => provid
 
 // Register the resumable attachment deduplication background migration (existing data)
 builder.Services.AddHostedService<AttachmentDeduplicationBackgroundService>();
+
+// Register AccountStorageService (scoped) and the autark refresh background service
+// (backfill on startup + daily full refresh, independent of DatabaseMaintenance:Enabled)
+builder.Services.AddScoped<IAccountStorageService, AccountStorageService>();
+builder.Services.AddHostedService<AccountStorageRefreshService>();
 
 // Register AccessLogService
 builder.Services.AddScoped<IAccessLogService, AccessLogService>();
