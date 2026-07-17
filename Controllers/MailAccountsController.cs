@@ -1428,6 +1428,54 @@ namespace MailArchiver.Controllers
             }
         }
 
+        // GET: MailAccounts/ImportPST
+        public async Task<IActionResult> ImportPST()
+        {
+            // Use the authentication service to get user info properly
+            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
+            var currentUsername = authService.GetCurrentUserDisplayName(HttpContext);
+            var isAdmin = authService.IsCurrentUserAdmin(HttpContext);
+            var isSelfManager = authService.IsCurrentUserSelfManager(HttpContext);
+
+            IQueryable<MailAccount> mailAccountsQuery;
+
+            // Check if user is admin (including legacy admin)
+            if (isAdmin)
+            {
+                _logger.LogInformation("User is admin, showing all accounts");
+                mailAccountsQuery = _context.MailAccounts;
+            }
+            else if (isSelfManager)
+            {
+                _logger.LogInformation("User is SelfManager, showing only assigned accounts");
+                mailAccountsQuery = _context.MailAccounts
+                    .Where(ma => ma.UserMailAccounts.Any(uma => uma.User.Username.ToLower() == currentUsername.ToLower()));
+            }
+            else
+            {
+                _logger.LogInformation("User has no special permissions, showing no accounts");
+                mailAccountsQuery = _context.MailAccounts.Where(ma => false); // Empty query
+            }
+
+            var accounts = await mailAccountsQuery
+                .Where(a => a.IsEnabled)
+                .OrderBy(a => a.Name)
+                .ToListAsync();
+
+            var model = new PstImportViewModel
+            {
+                AvailableAccounts = accounts.Select(a => new SelectListItem
+                {
+                    Value = a.Id.ToString(),
+                    Text = $"{a.Name} ({a.EmailAddress})"
+                }).ToList(),
+                MaxFileSize = _uploadOptions.MaxFileSizeBytes,
+                AccountProviders = accounts.ToDictionary(a => a.Id, a => a.Provider)
+            };
+
+            return View(model);
+        }
+
         // GET: MailAccounts/ImportMBox
         public async Task<IActionResult> ImportMBox()
         {
