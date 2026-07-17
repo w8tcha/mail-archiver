@@ -9,7 +9,6 @@ using Microsoft.Extensions.Options;
 using MimeKit;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace MailArchiver.Services.Core
@@ -195,7 +194,7 @@ namespace MailArchiver.Services.Core
             // Account filtering
             if (accountId.HasValue)
             {
-                if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(accountId.Value))
+                if (allowedAccountIds != null && !allowedAccountIds.Contains(accountId.Value))
                 {
                     _logger.LogWarning("User attempted to access account {AccountId} which is not in their allowed accounts list", accountId.Value);
                     return (new List<ArchivedEmail>(), 0);
@@ -542,7 +541,7 @@ namespace MailArchiver.Services.Core
 
             if (accountId.HasValue)
             {
-                if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(accountId.Value))
+                if (allowedAccountIds != null && !allowedAccountIds.Contains(accountId.Value))
                     return (new List<ArchivedEmail>(), 0);
                 baseQuery = baseQuery.Where(e => e.MailAccountId == accountId.Value);
             }
@@ -691,99 +690,11 @@ namespace MailArchiver.Services.Core
                     throw new InvalidOperationException($"Email with ID {parameters.EmailId.Value} not found");
                 }
 
-                switch (parameters.Format)
-                {
-                    case ExportFormat.Csv:
-                        await ExportSingleEmailAsCsv(email, ms);
-                        break;
-                    case ExportFormat.Json:
-                        await ExportSingleEmailAsJson(email, ms);
-                        break;
-                    case ExportFormat.Eml:
-                        await ExportSingleEmailAsEml(email, ms);
-                        break;
-                }
-            }
-            else
-            {
-                var searchTerm = parameters.SearchTerm ?? string.Empty;
-                var (emails, _) = await SearchEmailsAsync(
-                    searchTerm,
-                    parameters.FromDate,
-                    parameters.ToDate,
-                    parameters.SelectedAccountId,
-                    null,
-                    parameters.IsOutgoing,
-                    0,
-                    10000,
-                    allowedAccountIds);
-
-                switch (parameters.Format)
-                {
-                    case ExportFormat.Csv:
-                        await ExportMultipleEmailsAsCsv(emails, ms);
-                        break;
-                    case ExportFormat.Json:
-                        await ExportMultipleEmailsAsJson(emails, ms);
-                        break;
-                }
+                await ExportSingleEmailAsEml(email, ms);
             }
 
             ms.Position = 0;
             return ms.ToArray();
-        }
-
-        private async Task ExportSingleEmailAsCsv(ArchivedEmail email, MemoryStream ms)
-        {
-            using var writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
-            writer.WriteLine("Subject;From;To;Date;Account;Direction;Message Text");
-
-            var subject = email.Subject.Replace("\"", "\"\"").Replace(";", ",");
-            var from = email.From.Replace("\"", "\"\"").Replace(";", ",");
-            var to = email.To.Replace("\"", "\"\"").Replace(";", ",");
-            var sentDate = email.SentDate.ToString("yyyy-MM-dd HH:mm:ss");
-            var account = email.MailAccount?.Name.Replace("\"", "\"\"").Replace(";", ",") ?? "Unknown";
-            var direction = email.IsOutgoing ? "Outgoing" : "Incoming";
-            var body = email.Body?.Replace("\r", " ").Replace("\n", " ")
-                .Replace("\"", "\"\"").Replace(";", ",") ?? "";
-
-            writer.WriteLine($"\"{subject}\";\"{from}\";\"{to}\";\"{sentDate}\";\"{account}\";\"{direction}\";\"{body}\"");
-            await writer.FlushAsync();
-        }
-
-        private async Task ExportSingleEmailAsJson(ArchivedEmail email, MemoryStream ms)
-        {
-            var exportData = new
-            {
-                Id = email.Id,
-                Subject = email.Subject,
-                From = email.From,
-                To = email.To,
-                Cc = email.Cc,
-                Bcc = email.Bcc,
-                SentDate = email.SentDate,
-                ReceivedDate = email.ReceivedDate,
-                AccountName = email.MailAccount?.Name,
-                FolderName = email.FolderName,
-                IsOutgoing = email.IsOutgoing,
-                HasAttachments = email.HasAttachments,
-                MessageId = email.MessageId,
-                Body = email.Body,
-                HtmlBody = email.HtmlBody,
-                Attachments = email.Attachments?.Select(a => new
-                {
-                    FileName = a.FileName,
-                    ContentType = a.ContentType,
-                    Size = a.Size
-                }).ToList()
-            };
-
-            var options = new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            await JsonSerializer.SerializeAsync(ms, exportData, options);
         }
 
         private async Task ExportSingleEmailAsEml(ArchivedEmail email, MemoryStream ms)
@@ -794,11 +705,16 @@ namespace MailArchiver.Services.Core
             try { message.From.Add(InternetAddress.Parse(email.From)); }
             catch { message.From.Add(new MailboxAddress("Sender", "sender@example.com")); }
 
+            // Apply stored display name to the From address if available
+            MailContentHelper.ApplyDisplayNames(message.From, email.FromDisplayName);
+
             foreach (var to in email.To.Split(',', StringSplitOptions.RemoveEmptyEntries))
             {
                 try { message.To.Add(InternetAddress.Parse(to.Trim())); }
                 catch { continue; }
             }
+
+            MailContentHelper.ApplyDisplayNames(message.To, email.ToDisplayNames);
 
             if (!string.IsNullOrEmpty(email.Cc))
             {
@@ -807,6 +723,8 @@ namespace MailArchiver.Services.Core
                     try { message.Cc.Add(InternetAddress.Parse(cc.Trim())); }
                     catch { continue; }
                 }
+
+                MailContentHelper.ApplyDisplayNames(message.Cc, email.CcDisplayNames);
             }
 
             if (!string.IsNullOrEmpty(email.Bcc))
@@ -816,6 +734,8 @@ namespace MailArchiver.Services.Core
                     try { message.Bcc.Add(InternetAddress.Parse(bcc.Trim())); }
                     catch { continue; }
                 }
+
+                MailContentHelper.ApplyDisplayNames(message.Bcc, email.BccDisplayNames);
             }
 
             // Import raw headers if available (for forensic/compliance purposes)
@@ -951,47 +871,10 @@ namespace MailArchiver.Services.Core
                 message.Body = body;
             }
 
-            message.Date = email.SentDate;
+            message.Date = _dateTimeHelper.ToDisplayTimeZoneOffset(email.SentDate);
             message.MessageId = email.MessageId;
 
             await Task.Run(() => message.WriteTo(ms));
-        }
-
-        private async Task ExportMultipleEmailsAsCsv(List<ArchivedEmail> emails, MemoryStream ms)
-        {
-            using var writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
-            writer.WriteLine("Subject;From;To;Date;Account;Direction;Message Text");
-
-            foreach (var email in emails)
-            {
-                var subject = email.Subject.Replace("\"", "\"\"").Replace(";", ",");
-                var from = email.From.Replace("\"", "\"\"").Replace(";", ",");
-                var to = email.To.Replace("\"", "\"\"").Replace(";", ",");
-                var sentDate = email.SentDate.ToString("yyyy-MM-dd HH:mm:ss");
-                var account = email.MailAccount?.Name.Replace("\"", "\"\"").Replace(";", ",") ?? "Unknown";
-                var direction = email.IsOutgoing ? "Outgoing" : "Incoming";
-                var body = email.Body?.Replace("\r", " ").Replace("\n", " ")
-                    .Replace("\"", "\"\"").Replace(";", ",") ?? "";
-                writer.WriteLine($"\"{subject}\";\"{from}\";\"{to}\";\"{sentDate}\";\"{account}\";\"{direction}\";\"{body}\"");
-            }
-            await writer.FlushAsync();
-        }
-
-        private async Task ExportMultipleEmailsAsJson(List<ArchivedEmail> emails, MemoryStream ms)
-        {
-            var exportData = emails.Select(e => new
-            {
-                Subject = e.Subject,
-                From = e.From,
-                To = e.To,
-                SentDate = e.SentDate,
-                AccountName = e.MailAccount?.Name,
-                IsOutgoing = e.IsOutgoing,
-                Body = e.Body
-            }).ToList();
-
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            await JsonSerializer.SerializeAsync(ms, exportData, options);
         }
 
         #endregion
@@ -1166,6 +1049,18 @@ namespace MailArchiver.Services.Core
                 var bccAddresses = message.Bcc?.Select(m => m as MailboxAddress).Where(m => m != null).Select(m => m.Address) ?? new List<string>();
                 var bcc = MailContentHelper.CleanText(string.Join(", ", bccAddresses));
 
+                // Extract display names (MailboxAddress.Name) for faithful restore/export
+                var fromDisplayName = MailContentHelper.CleanText(fromAddress?.Name);
+                var toDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                    message.To?.Select(m => (m as MailboxAddress)?.Name)
+                            .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+                var ccDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                    message.Cc?.Select(m => (m as MailboxAddress)?.Name)
+                            .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+                var bccDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                    message.Bcc?.Select(m => (m as MailboxAddress)?.Name)
+                            .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+
                 // Extract text and HTML body preserving original encoding
                 var body = string.Empty;
                 var htmlBody = string.Empty;
@@ -1241,7 +1136,12 @@ namespace MailArchiver.Services.Core
                 to = MailContentHelper.TruncateFieldForTsvector(to, 50_000); // ~50KB for to (can be many recipients)
                 cc = MailContentHelper.TruncateFieldForTsvector(cc, 50_000); // ~50KB for cc
                 bcc = MailContentHelper.TruncateFieldForTsvector(bcc, 50_000); // ~50KB for bcc
-                                                             // Body already truncated above to 500KB
+                                                             // Body already truncated above
+
+                fromDisplayName = MailContentHelper.TruncateFieldForTsvector(fromDisplayName, 50_000);
+                toDisplayNames = MailContentHelper.TruncateFieldForTsvector(toDisplayNames, 50_000);
+                ccDisplayNames = MailContentHelper.TruncateFieldForTsvector(ccDisplayNames, 50_000);
+                bccDisplayNames = MailContentHelper.TruncateFieldForTsvector(bccDisplayNames, 50_000);
 
                 // Final safety check: ensure total size for tsvector doesn't exceed limit
                 var totalTsvectorSize = Encoding.UTF8.GetByteCount(subject) +
@@ -1300,6 +1200,10 @@ namespace MailArchiver.Services.Core
                     To = to,
                     Cc = cc,
                     Bcc = bcc,
+                    FromDisplayName = string.IsNullOrEmpty(fromDisplayName) ? null : fromDisplayName,
+                    ToDisplayNames = string.IsNullOrEmpty(toDisplayNames) ? null : toDisplayNames,
+                    CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
+                    BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
                     SentDate = convertedSentDate,
                     ReceivedDate = DateTime.UtcNow,
                     IsOutgoing = (isOutgoingEmail || isOutgoingFolder) && !isDraftsFolder,
@@ -1376,6 +1280,34 @@ namespace MailArchiver.Services.Core
                                 attachment.FileName, attachment.ContentType?.MimeType);
                         }
                     }
+                }
+
+                // Rescue floating text/calendar parts (Outlook/M365 meeting invitations).
+                // These parts are neither regular attachments nor inline content and would
+                // otherwise be silently dropped, leaving the archived email body empty.
+                var calendarExtraction = CalendarContentHelper.TryExtractCalendar(message);
+                if (calendarExtraction != null)
+                {
+                    if (string.IsNullOrEmpty(body))
+                    {
+                        body = CalendarContentHelper.ParseICalSummary(calendarExtraction.Content);
+                        originalTextBody = body;
+                        archivedEmail.Body = body;
+                        archivedEmail.OriginalBodyText = Encoding.UTF8.GetBytes(body);
+                    }
+
+                    var icsBytes = Encoding.UTF8.GetBytes(calendarExtraction.Content);
+                    var icsAttachment = new EmailAttachment
+                    {
+                        FileName = MailContentHelper.CleanText(calendarExtraction.FileName),
+                        ContentType = MailContentHelper.CleanText(calendarExtraction.MimeType),
+                        ContentId = null,
+                        Content = icsBytes,
+                        Size = icsBytes.Length
+                    };
+                    emailAttachments.Add(icsAttachment);
+                    archivedEmail.Attachments.Add(icsAttachment);
+                    archivedEmail.HasAttachments = true;
                 }
 
                 try
@@ -1931,6 +1863,21 @@ namespace MailArchiver.Services.Core
                 _logger.LogInformation("Found {Count} emails to delete from local archive for account {AccountName}",
                     emailsToDelete.Count, account.Name);
 
+                // Unlock emails that fall under the retention policy so the database
+                // compliance trigger (prevent_locked_email_deletion) allows the deletion.
+                // Retention is exempt from the global DeletionPolicy lock.
+                try
+                {
+                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE mail_archiver.\"ArchivedEmails\" SET \"IsLocked\" = false WHERE \"MailAccountId\" = {account.Id} AND \"SentDate\" < {cutoffDate}");
+                    _logger.LogDebug("Unlocked {Count} retention-expired emails for account {AccountName} prior to deletion",
+                        emailsToDelete.Count, account.Name);
+                }
+                catch (Exception unlockEx)
+                {
+                    _logger.LogError(unlockEx, "Failed to unlock retention-expired emails for account {AccountName}", account.Name);
+                }
+
                 // Delete in batches to avoid memory issues
                 var batchSize = _batchOptions.BatchSize;
                 var deletedCount = 0;
@@ -2029,7 +1976,7 @@ namespace MailArchiver.Services.Core
                 if (accountId.HasValue)
                 {
                     // Check access permission
-                    if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(accountId.Value))
+                    if (allowedAccountIds != null && !allowedAccountIds.Contains(accountId.Value))
                     {
                         _logger.LogWarning("User attempted to access folder tree for account {AccountId} which is not in their allowed accounts list", accountId.Value);
                         return new List<FolderTreeNode>();
@@ -2082,69 +2029,7 @@ namespace MailArchiver.Services.Core
                         folderData.Count - validFolderData.Count, accountId);
                 }
 
-                // Build the folder tree based on actual parent-child relationships.
-                // Only create hierarchy when a parent folder actually exists in the data.
-                // This prevents folder names containing '/'
-                // from being incorrectly split into phantom sub-hierarchies.
-                var folderNameSet = new HashSet<string>(
-                    validFolderData.Select(f => f.FolderName),
-                    StringComparer.OrdinalIgnoreCase);
-
-                // Create all nodes
-                var allNodes = new Dictionary<string, FolderTreeNode>(StringComparer.OrdinalIgnoreCase);
-                foreach (var folder in validFolderData)
-                {
-                    allNodes[folder.FolderName] = new FolderTreeNode
-                    {
-                        Name = folder.FolderName,
-                        FullPath = folder.FolderName,
-                        TotalCount = folder.Count,
-                        UnreadCount = 0,
-                        Children = new List<FolderTreeNode>()
-                    };
-                }
-
-                // Build parent-child relationships.
-                // Process shortest names first so parents are set up before their children.
-                var rootNodes = new List<FolderTreeNode>();
-
-                foreach (var folder in validFolderData.OrderBy(f => f.FolderName.Length).ThenBy(f => f.FolderName))
-                {
-                    var node = allNodes[folder.FolderName];
-                    string? parentPath = null;
-
-                    // Find the nearest existing parent by scanning for hierarchy separators from right to left.
-                    // Common IMAP separators: '/' (most servers), '.', '\\' (rare)
-                    for (int i = folder.FolderName.Length - 1; i >= 0; i--)
-                    {
-                        if (folder.FolderName[i] == '/' || folder.FolderName[i] == '\\' || folder.FolderName[i] == '.')
-                        {
-                            var candidate = folder.FolderName.Substring(0, i);
-                            if (folderNameSet.Contains(candidate))
-                            {
-                                parentPath = candidate;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (parentPath != null && allNodes.TryGetValue(parentPath, out var parentNode))
-                    {
-                        // Child folder — display name is the suffix after the parent path
-                        node.Name = folder.FolderName.Substring(parentPath.Length + 1);
-                        node.Level = parentNode.Level + 1;
-                        parentNode.Children.Add(node);
-                    }
-                    else
-                    {
-                        // Root folder — display name stays as the full folder name
-                        node.Level = 0;
-                        rootNodes.Add(node);
-                    }
-                }
-
-                // Sort folders alphabetically, but keep INBOX-like folders at top
-                return SortFolderTree(rootNodes);
+                return BuildFolderTree(validFolderData.Select(f => (f.FolderName, f.Count)).ToList());
             }
             catch (Exception ex)
             {
@@ -2153,10 +2038,81 @@ namespace MailArchiver.Services.Core
             }
         }
 
+        // Builds the folder tree from (folderName, count) pairs. Extracted from GetFolderTreeAsync so
+        // it can be unit-tested. Folder names that differ only in case are treated as one folder
+        // (IMAP INBOX is case-insensitive): their counts are merged and the node is emitted once.
+        internal static List<FolderTreeNode> BuildFolderTree(List<(string Name, int Count)> folders)
+        {
+            // Only create hierarchy when a parent folder actually exists in the data. This prevents
+            // folder names containing '/' (or '.') from being split into phantom sub-hierarchies.
+            var folderNameSet = new HashSet<string>(
+                folders.Select(f => f.Name),
+                StringComparer.OrdinalIgnoreCase);
+
+            // Create nodes. If two folders differ only in case (e.g. "INBOX" and "Inbox" from two
+            // accounts) merge their counts into a single node, so the same node is not emitted twice.
+            var allNodes = new Dictionary<string, FolderTreeNode>(StringComparer.OrdinalIgnoreCase);
+            foreach (var folder in folders)
+            {
+                if (allNodes.TryGetValue(folder.Name, out var existing))
+                {
+                    existing.TotalCount += folder.Count;
+                    continue;
+                }
+                allNodes[folder.Name] = new FolderTreeNode
+                {
+                    Name = folder.Name,
+                    FullPath = folder.Name,
+                    TotalCount = folder.Count,
+                    UnreadCount = 0,
+                    Children = new List<FolderTreeNode>()
+                };
+            }
+
+            // Build parent-child relationships. Iterate the DISTINCT nodes (not the raw folder list),
+            // so each node is placed exactly once; process shortest paths first so parents exist first.
+            var rootNodes = new List<FolderTreeNode>();
+            foreach (var node in allNodes.Values.OrderBy(n => n.FullPath.Length).ThenBy(n => n.FullPath, StringComparer.Ordinal))
+            {
+                string? parentPath = null;
+
+                // Find the nearest existing parent by scanning for hierarchy separators from right to left.
+                // Common IMAP separators: '/' (most servers), '.', '\\' (rare)
+                for (int i = node.FullPath.Length - 1; i >= 0; i--)
+                {
+                    if (node.FullPath[i] == '/' || node.FullPath[i] == '\\' || node.FullPath[i] == '.')
+                    {
+                        var candidate = node.FullPath.Substring(0, i);
+                        if (folderNameSet.Contains(candidate))
+                        {
+                            parentPath = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                if (parentPath != null && allNodes.TryGetValue(parentPath, out var parentNode) && !ReferenceEquals(parentNode, node))
+                {
+                    // Child folder — display name is the suffix after the parent path
+                    node.Name = node.FullPath.Substring(parentPath.Length + 1);
+                    node.Level = parentNode.Level + 1;
+                    parentNode.Children.Add(node);
+                }
+                else
+                {
+                    // Root folder — display name stays as the full folder name
+                    node.Level = 0;
+                    rootNodes.Add(node);
+                }
+            }
+
+            return SortFolderTree(rootNodes);
+        }
+
         /// <summary>
         /// Sorts the folder tree with INBOX at the top, then special folders, then alphabetically
         /// </summary>
-        private List<FolderTreeNode> SortFolderTree(List<FolderTreeNode> nodes)
+        private static List<FolderTreeNode> SortFolderTree(List<FolderTreeNode> nodes)
         {
             if (nodes == null || !nodes.Any())
                 return nodes;

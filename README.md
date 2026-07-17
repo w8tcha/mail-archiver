@@ -25,6 +25,7 @@
 - Advanced search with filters
 - Email preview with attachments
 - Export accounts or selected emails as mbox / zipped EML
+- Read-only REST API (v1) for programmatic access to the archive via scoped per-user API keys — lets scripts and AI agents read archived mail without ever exposing mailbox credentials ([REST API Guide](doc/API.md))
 
 ### 👥 User Management
 - Multi-user support with account-specific permissions
@@ -34,6 +35,7 @@
 ### 🧩 Email Provider Support
 - **IMAP**: Traditional IMAP accounts with full synchronization capabilities
 - **M365**: Microsoft 365 mail accounts via Microsoft Graph API ([Setup Guide](doc/AZURE_APP_REGISTRATION_M365.md))
+- **Microsoft Personal**: Personal Microsoft accounts (Outlook.com, Hotmail, live.com, M365 Family) via OAuth2 Device Code Flow — ships with a pre-registered shared Client ID so no Azure App Registration is required ([Setup Guide](doc/MSA_Outlook_Setup.md))
 - **IMPORT**: Import-only accounts for migrating existing email archives
 
 ### 🏢 M365 Tenant Import
@@ -51,6 +53,11 @@
 - Automatic deletion from mailserver after a configurable period ([Retention Policies](doc/RetentionPolicies.md))
 - Per-account retention (e.g., 30, 90, or 365 days)
 - Separate retention for the local archive
+
+### 🔒 Deletion Lock (Compliance)
+- Disable manual deletion of archived emails via `DeletionPolicy__DeletionAllowed=false`
+- Local retention deletion remains exempt and still runs
+- See [Setup Guide](doc/Setup.md#-deletion-policy-settings) for details
 
 ### 📋 Access Log
 - The application logs various types of user activities such as Login, Opening, Searches, Exports and many more. ([Logging](doc/Logs.md))

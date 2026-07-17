@@ -42,6 +42,8 @@ namespace MailArchiver.Models
         Account,
         Deletion,
         DatabaseMaintenance,
-        SyncCancel
+        SyncCancel,
+        DeletionPolicy,
+        SyncAcknowledgeFailures
     }
 }

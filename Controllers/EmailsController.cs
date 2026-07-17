@@ -37,6 +37,7 @@ namespace MailArchiver.Controllers
         private readonly MailArchiver.Services.IAuthenticationService _authService;
         private readonly IEmailDeletionService? _emailDeletionService;
         private readonly ViewOptions _viewOptions;
+        private readonly DeletionPolicyOptions _deletionPolicy;
 
         public EmailsController(
             MailArchiverDbContext context,
@@ -47,6 +48,7 @@ namespace MailArchiver.Controllers
             IOptions<BatchRestoreOptions> batchOptions,
             IOptions<SelectionOptions> selectionOptions,
             IOptions<ViewOptions> viewOptions,
+            IOptions<DeletionPolicyOptions> deletionPolicy,
             IBatchRestoreService? batchRestoreService = null,
             ISyncJobService? syncJobService = null,
             IStringLocalizer<SharedResource> localizer = null,
@@ -68,6 +70,7 @@ namespace MailArchiver.Controllers
             _batchOptions = batchOptions.Value;
             _selectionOptions = selectionOptions.Value;
             _viewOptions = viewOptions.Value;
+            _deletionPolicy = deletionPolicy.Value;
             _localizer = localizer;
             _exportService = exportService;
             _selectedEmailsExportService = selectedEmailsExportService;
@@ -560,7 +563,7 @@ namespace MailArchiver.Controllers
             }
 
             // Check if user has access to this email's account
-            if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(email.MailAccountId))
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(email.MailAccountId))
             {
                 TempData["ErrorMessage"] = "You do not have access to this email.";
                 return RedirectToAction("Index");
@@ -581,14 +584,6 @@ namespace MailArchiver.Controllers
 
                 switch (format)
                 {
-                    case ExportFormat.Csv:
-                        contentType = "text/csv";
-                        fileName = $"email-{id}-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
-                        break;
-                    case ExportFormat.Json:
-                        contentType = "application/json";
-                        fileName = $"email-{id}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
-                        break;
                     case ExportFormat.Eml:
                         contentType = "message/rfc822";
                         fileName = $"email-{id}-{DateTime.Now:yyyyMMdd-HHmmss}.eml";
@@ -801,7 +796,7 @@ namespace MailArchiver.Controllers
             }
 
             // Check if user is allowed to access the target account
-            if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(model.TargetAccountId))
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
             {
                 _logger.LogWarning("User {Username} attempted to restore email to account {AccountId} which they don't have access to", 
                     authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
@@ -1274,7 +1269,7 @@ namespace MailArchiver.Controllers
             }
 
             // Check if user is allowed to access the target account
-            if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(model.TargetAccountId))
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
             {
                 _logger.LogWarning("User {Username} attempted to restore emails to account {AccountId} which they don't have access to", 
                     authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
@@ -1764,7 +1759,7 @@ namespace MailArchiver.Controllers
             }
 
             // Check if user is allowed to access the target account
-            if (allowedAccountIds != null && allowedAccountIds.Any() && !allowedAccountIds.Contains(model.TargetAccountId))
+            if (allowedAccountIds != null && !allowedAccountIds.Contains(model.TargetAccountId))
             {
                 _logger.LogWarning("User {Username} attempted to restore emails to account {AccountId} which they don't have access to", 
                     authService?.GetCurrentUserDisplayName(HttpContext), model.TargetAccountId);
@@ -1936,6 +1931,40 @@ namespace MailArchiver.Controllers
             else
             {
                 TempData["ErrorMessage"] = "Could not cancel the sync job.";
+            }
+
+            return Redirect(returnUrl ?? Url.Action("Jobs"));
+        }
+
+        // POST: Emails/AcknowledgeSyncFailures
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AcknowledgeSyncFailures(string jobId, string returnUrl = null)
+        {
+            if (_syncJobService == null)
+            {
+                TempData["ErrorMessage"] = "Sync job service is not available.";
+                return Redirect(returnUrl ?? Url.Action("Jobs"));
+            }
+
+            var job = _syncJobService.GetJob(jobId);
+            var success = _syncJobService.AcknowledgeJobFailures(jobId);
+
+            if (success)
+            {
+                TempData["SuccessMessage"] = _localizer["AcknowledgeFailuresSuccess"].Value;
+
+                var currentUsername = _authService.GetCurrentUserDisplayName(HttpContext);
+                if (!string.IsNullOrEmpty(currentUsername) && _accessLogService != null && job != null)
+                {
+                    await _accessLogService.LogAccessAsync(currentUsername, AccessLogType.SyncAcknowledgeFailures,
+                        searchParameters: $"Acknowledged {job.FailedEmails} failed emails for account: {job.AccountName}",
+                        mailAccountId: job.MailAccountId);
+                }
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Could not acknowledge the sync failures. The job may no longer be available or has no failed emails.";
             }
 
             return Redirect(returnUrl ?? Url.Action("Jobs"));
@@ -2331,128 +2360,6 @@ namespace MailArchiver.Controllers
             }
         }
 
-        // POST: Emails/ExportSearchResults
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ExportSearchResults(ExportViewModel model)
-        {
-            // Entferne ModelState-Validierung für SearchTerm falls leer
-            if (string.IsNullOrEmpty(model.SearchTerm))
-            {
-                ModelState.Remove("SearchTerm");
-            }
-
-            if (!ModelState.IsValid)
-            {
-                // Log validation errors für debugging
-                _logger.LogWarning("Export validation failed. Errors: {Errors}",
-                    string.Join(", ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)));
-
-                // Redirect zurück zur Index-Seite mit Fehlermeldung
-                TempData["ErrorMessage"] = "Export parameters are invalid. Please try again.";
-                return RedirectToAction("Index");
-            }
-
-            // Get current user's allowed accounts for filtering
-            List<int> allowedAccountIds = null;
-            var authService = HttpContext.RequestServices.GetService<MailArchiver.Services.IAuthenticationService>();
-            var userService = HttpContext.RequestServices.GetService<IUserService>();
-            
-            if (authService != null && userService != null && !authService.IsCurrentUserAdmin(HttpContext))
-            {
-                var username = authService.GetCurrentUserDisplayName(HttpContext);
-                var user = await userService.GetUserByUsernameAsync(username);
-                if (user != null)
-                {
-                    var userAccounts = await userService.GetUserMailAccountsAsync(user.Id);
-                    allowedAccountIds = userAccounts.Select(a => a.Id).ToList();
-                }
-            }
-
-            // Update the model with allowed account filtering
-            if (allowedAccountIds != null && allowedAccountIds.Any())
-            {
-                // If user has selected a specific account, ensure they have access to it
-                if (model.SelectedAccountId.HasValue && !allowedAccountIds.Contains(model.SelectedAccountId.Value))
-                {
-                    TempData["ErrorMessage"] = "You do not have access to the selected account.";
-                    return RedirectToAction("Index");
-                }
-                
-                // If no account is selected, we'll filter by allowed accounts in the search
-                if (!model.SelectedAccountId.HasValue)
-                {
-                    // We'll handle this in the email service by passing allowedAccountIds
-                }
-            }
-
-            try
-            {
-                // For single email export, we don't need to filter by accounts
-                if (model.EmailId.HasValue)
-                {
-                    var fileBytes = await _emailCoreService.ExportEmailsAsync(model, allowedAccountIds);
-                    
-                    string contentType;
-                    string fileName;
-                    switch (model.Format)
-                    {
-                        case ExportFormat.Csv:
-                            contentType = "text/csv";
-                            fileName = $"emails-export-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
-                            break;
-                        case ExportFormat.Json:
-                            contentType = "application/json";
-                            fileName = $"emails-export-{DateTime.Now:yyyyMMdd-HHmmss}.json";
-                            break;
-                        case ExportFormat.Eml:
-                            contentType = "message/rfc822";
-                            fileName = $"email-{DateTime.Now:yyyyMMdd-HHmmss}.eml";
-                            break;
-                        default:
-                            contentType = "application/octet-stream";
-                            fileName = $"export-{DateTime.Now:yyyyMMdd-HHmmss}.dat";
-                            break;
-                    }
-
-                    Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
-                    return File(fileBytes, contentType, fileName);
-                }
-                else
-                {
-                    // For search results export, we need to ensure proper filtering
-                    var fileBytes = await _emailCoreService.ExportEmailsAsync(model, allowedAccountIds);
-
-                    string contentType;
-                    string fileName;
-                    switch (model.Format)
-                    {
-                        case ExportFormat.Csv:
-                            contentType = "text/csv";
-                            fileName = $"emails-export-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
-                            break;
-                        case ExportFormat.Json:
-                            contentType = "application/json";
-                            fileName = $"emails-export-{DateTime.Now:yyyyMMdd-HHmmss}.json";
-                            break;
-                        default:
-                            contentType = "application/octet-stream";
-                            fileName = $"export-{DateTime.Now:yyyyMMdd-HHmmss}.dat";
-                            break;
-                    }
-
-                    Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
-                    return File(fileBytes, contentType, fileName);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during email export");
-                TempData["ErrorMessage"] = $"Export failed: {ex.Message}";
-                return RedirectToAction("Index");
-            }
-        }
-
         // GET: Emails/RawContent/5
         [EmailAccessRequired]
         public async Task<IActionResult> RawContent(int id, bool plainText = false)
@@ -2728,7 +2635,14 @@ namespace MailArchiver.Controllers
         public async Task<IActionResult> Delete(int id, string returnUrl = null)
         {
             _logger.LogInformation("Admin user requesting to delete email ID: {EmailId}", id);
-            
+
+            if (!_deletionPolicy.DeletionAllowed)
+            {
+                _logger.LogWarning("Email deletion blocked by policy (DeletionPolicy:DeletionAllowed=false). Email ID: {EmailId}", id);
+                TempData["ErrorMessage"] = _localizer?["DeletionDisabledMessage"] ?? "Email deletion is disabled by configuration.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
             var email = await _context.ArchivedEmails
                 .Include(e => e.MailAccount)
                 .FirstOrDefaultAsync(e => e.Id == id);
@@ -2788,7 +2702,14 @@ namespace MailArchiver.Controllers
                 TempData["ErrorMessage"] = "No emails selected for deletion.";
                 return Redirect(returnUrl ?? Url.Action("Index"));
             }
-            
+
+            if (!_deletionPolicy.DeletionAllowed)
+            {
+                _logger.LogWarning("Bulk email deletion blocked by policy (DeletionPolicy:DeletionAllowed=false). Requested count: {Count}", ids.Count);
+                TempData["ErrorMessage"] = _localizer?["DeletionDisabledMessage"] ?? "Email deletion is disabled by configuration.";
+                return Redirect(returnUrl ?? Url.Action("Index"));
+            }
+
             _logger.LogInformation("Admin user requesting to delete {Count} emails", ids.Count);
 
             // SECURITY: filter the requested ids to those the current user is authorized to
@@ -3033,7 +2954,7 @@ namespace MailArchiver.Controllers
                 }
 
                 // Filter the email IDs based on user's allowed accounts
-                if (allowedAccountIds != null && allowedAccountIds.Any())
+                if (allowedAccountIds != null)
                 {
                     var allowedEmailIds = await _context.ArchivedEmails
                         .Where(e => ids.Contains(e.Id) && allowedAccountIds.Contains(e.MailAccountId))

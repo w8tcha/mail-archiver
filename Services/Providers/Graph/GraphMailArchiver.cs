@@ -206,6 +206,18 @@ namespace MailArchiver.Services.Providers.Graph
             var cc = MailContentHelper.CleanText(string.Join(", ", message.CcRecipients?.Select(r => r.EmailAddress?.Address) ?? new List<string>()));
             var bcc = MailContentHelper.CleanText(string.Join(", ", message.BccRecipients?.Select(r => r.EmailAddress?.Address) ?? new List<string>()));
 
+            // Extract display names for faithful restore/export
+            var fromDisplayName = MailContentHelper.CleanText(message.From?.EmailAddress?.Name ?? string.Empty);
+            var toDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                message.ToRecipients?.Select(r => r.EmailAddress?.Name)
+                        .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+            var ccDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                message.CcRecipients?.Select(r => r.EmailAddress?.Name)
+                        .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+            var bccDisplayNames = MailContentHelper.CleanText(string.Join(", ",
+                message.BccRecipients?.Select(r => r.EmailAddress?.Name)
+                        .Where(n => !string.IsNullOrEmpty(n)) ?? Enumerable.Empty<string>()));
+
             var (body, htmlBody) = ExtractBody(message);
             var originalTextBody = message.Body?.ContentType == BodyType.Text ? message.Body?.Content : (message.BodyPreview ?? "");
             var originalHtmlBody = message.Body?.ContentType == BodyType.Html ? message.Body?.Content : null;
@@ -222,6 +234,11 @@ namespace MailArchiver.Services.Providers.Graph
             to = MailContentHelper.TruncateFieldForTsvector(to, 50_000);
             cc = MailContentHelper.TruncateFieldForTsvector(cc, 50_000);
             bcc = MailContentHelper.TruncateFieldForTsvector(bcc, 50_000);
+
+            fromDisplayName = MailContentHelper.TruncateFieldForTsvector(fromDisplayName, 50_000);
+            toDisplayNames = MailContentHelper.TruncateFieldForTsvector(toDisplayNames, 50_000);
+            ccDisplayNames = MailContentHelper.TruncateFieldForTsvector(ccDisplayNames, 50_000);
+            bccDisplayNames = MailContentHelper.TruncateFieldForTsvector(bccDisplayNames, 50_000);
 
             // Final safety check: ensure total tsvector size doesn't exceed limit
             var totalTsvectorSize = Encoding.UTF8.GetByteCount(subject) +
@@ -267,6 +284,10 @@ namespace MailArchiver.Services.Providers.Graph
                 To = to,
                 Cc = cc,
                 Bcc = bcc,
+                FromDisplayName = string.IsNullOrEmpty(fromDisplayName) ? null : fromDisplayName,
+                ToDisplayNames = string.IsNullOrEmpty(toDisplayNames) ? null : toDisplayNames,
+                CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
+                BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
                 SentDate = convertedSentDate,
                 ReceivedDate = DateTime.UtcNow,
                 IsOutgoing = isOutgoingEmail || isOutgoing,
@@ -282,13 +303,44 @@ namespace MailArchiver.Services.Providers.Graph
                     ? Encoding.UTF8.GetBytes(originalHtmlBody!)
                     : null,
                 FolderName = cleanFolderName,
-                Attachments = new List<EmailAttachment>()
+                Attachments = new List<EmailAttachment>(),
+                RawHeaders = ExtractGraphRawHeaders(message)
             };
 
             // Load attachments before hash calculation
             await LoadAttachmentsAsync(graphClient, account.EmailAddress, message.Id, archivedEmail);
 
             archivedEmail.HasAttachments = archivedEmail.Attachments != null && archivedEmail.Attachments.Count > 0;
+
+            // Outlook/M365 meeting invitations: Graph exposes the iCalendar payload as a
+            // FileAttachment with ContentType "text/calendar" (or a .ics file name) but does
+            // not populate the message body with the event details. When the body is empty,
+            // synthesise a readable summary from the .ics attachment so the archived email is
+            // not displayed without any content.
+            if (string.IsNullOrEmpty(archivedEmail.Body) && archivedEmail.Attachments != null)
+            {
+                var icsAttachment = archivedEmail.Attachments.FirstOrDefault(a =>
+                    (a.ContentType != null && a.ContentType.StartsWith("text/calendar", StringComparison.OrdinalIgnoreCase))
+                    || (a.FileName != null && a.FileName.EndsWith(".ics", StringComparison.OrdinalIgnoreCase)));
+
+                if (icsAttachment?.Content != null)
+                {
+                    try
+                    {
+                        var icsContent = Encoding.UTF8.GetString(icsAttachment.Content);
+                        var summary = CalendarContentHelper.ParseICalSummary(icsContent);
+                        if (!string.IsNullOrEmpty(summary))
+                        {
+                            archivedEmail.Body = summary;
+                            archivedEmail.OriginalBodyText = Encoding.UTF8.GetBytes(summary);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse iCalendar attachment for Graph message {MessageId}", messageId);
+                    }
+                }
+            }
 
             return archivedEmail;
         }
@@ -353,6 +405,56 @@ namespace MailArchiver.Services.Providers.Graph
             }
 
             return (body, htmlBody);
+        }
+
+        /// <summary>
+        /// Extracts raw internet headers from a Graph message in the same "Name: Value\r\n"
+        /// line-per-header format used by the IMAP path (EmailCoreService.ExtractRawHeaders),
+        /// so downstream consumers see an identical shape regardless of provider.
+        /// Graph returns these only when "internetMessageHeaders" is explicitly $select-ed.
+        /// </summary>
+        private string? ExtractGraphRawHeaders(Message message)
+        {
+            try
+            {
+                if (message.InternetMessageHeaders == null || message.InternetMessageHeaders.Count == 0)
+                {
+                    return null;
+                }
+
+                var headersBuilder = new StringBuilder();
+                foreach (var header in message.InternetMessageHeaders)
+                {
+                    if (header == null || string.IsNullOrEmpty(header.Name))
+                    {
+                        continue;
+                    }
+                    headersBuilder.AppendLine($"{header.Name}: {header.Value}");
+                }
+
+                var rawHeaders = headersBuilder.ToString();
+                if (string.IsNullOrEmpty(rawHeaders))
+                {
+                    return null;
+                }
+
+                const int maxHeaderSize = 100_000;
+                if (rawHeaders.Length > maxHeaderSize)
+                {
+                    _logger.LogWarning("Graph raw headers exceed {MaxSize} bytes, truncating", maxHeaderSize);
+                    rawHeaders = rawHeaders.Substring(0, maxHeaderSize) + "\r\n[... Headers truncated due to size ...]";
+                }
+
+                _logger.LogDebug("Extracted {Count} raw headers ({Size} bytes) from Graph email",
+                    message.InternetMessageHeaders.Count, rawHeaders.Length);
+
+                return rawHeaders;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract raw headers from Graph email: {Message}", ex.Message);
+                return null;
+            }
         }
 
         /// <summary>

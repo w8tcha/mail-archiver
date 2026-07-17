@@ -102,6 +102,18 @@ namespace MailArchiver.Services.Shared
                 var bcc = MailContentHelper.TruncateFieldForTsvector(
                     MailContentHelper.CleanText(string.Join(", ", message.Bcc?.Mailboxes.Select(m => m.Address) ?? Enumerable.Empty<string>())), 50_000);
 
+                var fromDisplayName = MailContentHelper.TruncateFieldForTsvector(
+                    MailContentHelper.CleanText(message.From.Mailboxes.FirstOrDefault()?.Name ?? string.Empty), 50_000);
+                var toDisplayNames = MailContentHelper.TruncateFieldForTsvector(
+                    MailContentHelper.CleanText(string.Join(", ",
+                        message.To.Mailboxes.Select(m => m.Name).Where(n => !string.IsNullOrEmpty(n)))), 50_000);
+                var ccDisplayNames = MailContentHelper.TruncateFieldForTsvector(
+                    MailContentHelper.CleanText(string.Join(", ",
+                        (message.Cc ?? new InternetAddressList()).Mailboxes.Select(m => m.Name).Where(n => !string.IsNullOrEmpty(n)))), 50_000);
+                var bccDisplayNames = MailContentHelper.TruncateFieldForTsvector(
+                    MailContentHelper.CleanText(string.Join(", ",
+                        (message.Bcc ?? new InternetAddressList()).Mailboxes.Select(m => m.Name).Where(n => !string.IsNullOrEmpty(n)))), 50_000);
+
                 var totalTsvectorSize = Encoding.UTF8.GetByteCount(subject + body + from + to + cc + bcc);
                 if (totalTsvectorSize > 900_000)
                 {
@@ -123,6 +135,10 @@ namespace MailArchiver.Services.Shared
                 {
                     MailAccountId = account.Id, MessageId = messageId,
                     Subject = subject, From = from, To = to, Cc = cc, Bcc = bcc,
+                    FromDisplayName = string.IsNullOrEmpty(fromDisplayName) ? null : fromDisplayName,
+                    ToDisplayNames = string.IsNullOrEmpty(toDisplayNames) ? null : toDisplayNames,
+                    CcDisplayNames = string.IsNullOrEmpty(ccDisplayNames) ? null : ccDisplayNames,
+                    BccDisplayNames = string.IsNullOrEmpty(bccDisplayNames) ? null : bccDisplayNames,
                     SentDate = convertedSentDate, ReceivedDate = DateTime.UtcNow,
                     IsOutgoing = DetermineIfOutgoing(message, account, targetFolder),
                     HasAttachments = allAttachments.Any(), Body = body, HtmlBody = htmlBody,
@@ -154,6 +170,30 @@ namespace MailArchiver.Services.Shared
                         }
                         catch (Exception ex) { _logger.LogWarning(ex, "Job {JobId}: Failed to process attachment", jobId); }
                     }
+                }
+
+                // Rescue floating text/calendar parts (Outlook/M365 meeting invitations).
+                var calendarExtraction = CalendarContentHelper.TryExtractCalendar(message);
+                if (calendarExtraction != null)
+                {
+                    if (string.IsNullOrEmpty(body))
+                    {
+                        body = CalendarContentHelper.ParseICalSummary(calendarExtraction.Content);
+                        originalTextBody = body;
+                        archivedEmail.Body = body;
+                        archivedEmail.OriginalBodyText = Encoding.UTF8.GetBytes(body);
+                    }
+
+                    var icsBytes = Encoding.UTF8.GetBytes(calendarExtraction.Content);
+                    archivedEmail.Attachments.Add(new EmailAttachment
+                    {
+                        FileName = MailContentHelper.CleanText(calendarExtraction.FileName),
+                        ContentType = MailContentHelper.CleanText(calendarExtraction.MimeType),
+                        ContentId = null,
+                        Content = icsBytes,
+                        Size = icsBytes.Length
+                    });
+                    archivedEmail.HasAttachments = true;
                 }
 
                 context.ArchivedEmails.Add(archivedEmail);

@@ -187,9 +187,6 @@
   <data name="NoEmailsFoundText" xml:space="preserve">
     <value>Aucun email n'a été trouvé pour les critères de recherche spécifiés.</value>
   </data>
-  <data name="ExportSearchResults" xml:space="preserve">
-    <value>Exporter les résultats de recherche</value>
-  </data>
   <data name="ExportFormat" xml:space="preserve">
     <value>Format d'exportation</value>
   </data>
@@ -267,6 +264,9 @@
   </data>
   <data name="Storage" xml:space="preserve">
     <value>Stockage</value>
+  </data>
+  <data name="DatabaseStorage" xml:space="preserve">
+    <value>Taille de la base de données</value>
   </data>
   <data name="EmailsPerMonth" xml:space="preserve">
     <value>Emails par mois</value>
@@ -2539,6 +2539,12 @@
   <data name="SyncCancel" xml:space="preserve">
     <value>Synchronisation annulée</value>
   </data>
+  <data name="DeletionPolicy" xml:space="preserve">
+    <value>Politique de suppression</value>
+  </data>
+  <data name="DeletionDisabledMessage" xml:space="preserve">
+    <value>La suppression des e-mails est désactivée par configuration.</value>
+  </data>
   <data name="ConfirmBatchDelete" xml:space="preserve">
     <value>Confirmer la suppression par lot</value>
   </data>
@@ -3066,5 +3072,108 @@
   </data>
   <data name="ImportAccountsHeader" xml:space="preserve">
     <value>Importer des comptes</value>
+  </data>
+  <!-- API Keys (read-only REST API) -->
+  <data name="ApiKeys" xml:space="preserve">
+    <value>Clés API</value>
+  </data>
+  <data name="ApiKeysDescription" xml:space="preserve">
+    <value>Gérez les clés API pour un accès programmatique en lecture seule à vos e-mails archivés.</value>
+  </data>
+  <data name="CreateApiKey" xml:space="preserve">
+    <value>Créer une clé API</value>
+  </data>
+  <data name="ApiKeyName" xml:space="preserve">
+    <value>Nom</value>
+  </data>
+  <data name="ApiKeyExpiration" xml:space="preserve">
+    <value>Expiration (facultatif)</value>
+  </data>
+  <data name="ApiKeyCreatedOnce" xml:space="preserve">
+    <value>Copiez cette clé maintenant. Pour des raisons de sécurité, elle n'est affichée qu'une seule fois et ne pourra pas être récupérée plus tard.</value>
+  </data>
+  <data name="ApiKeyValue" xml:space="preserve">
+    <value>Clé API</value>
+  </data>
+  <data name="ApiKeyPrefix" xml:space="preserve">
+    <value>Préfixe</value>
+  </data>
+  <data name="ApiKeyCreatedColumn" xml:space="preserve">
+    <value>Créée</value>
+  </data>
+  <data name="ApiKeyLastUsed" xml:space="preserve">
+    <value>Dernière utilisation</value>
+  </data>
+  <data name="ApiKeyExpires" xml:space="preserve">
+    <value>Expire</value>
+  </data>
+  <data name="ApiKeyStatus" xml:space="preserve">
+    <value>Statut</value>
+  </data>
+  <data name="ApiKeyActive" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="ApiKeyRevoked" xml:space="preserve">
+    <value>Révoquée</value>
+  </data>
+  <data name="ApiKeyExpired" xml:space="preserve">
+    <value>Expirée</value>
+  </data>
+  <data name="ApiKeyRevoke" xml:space="preserve">
+    <value>Révoquer</value>
+  </data>
+  <data name="ApiKeyRevokeConfirm" xml:space="preserve">
+    <value>Révoquer cette clé API ? Les applications qui l'utilisent cesseront immédiatement de fonctionner.</value>
+  </data>
+  <data name="ApiKeyOwner" xml:space="preserve">
+    <value>Propriétaire</value>
+  </data>
+  <data name="NoApiKeys" xml:space="preserve">
+    <value>Aucune clé API pour le moment.</value>
+  </data>
+  <data name="ApiKeyCreatedSuccess" xml:space="preserve">
+    <value>Clé API créée.</value>
+  </data>
+  <data name="ApiKeyRevokedSuccess" xml:space="preserve">
+    <value>Clé API révoquée.</value>
+  </data>
+  <data name="ApiKeyRevokeFailed" xml:space="preserve">
+    <value>Impossible de révoquer la clé API.</value>
+  </data>
+  <data name="Copy" xml:space="preserve">
+    <value>Copier</value>
+  </data>
+  <data name="MeetingInvitation" xml:space="preserve">
+    <value>Invitation à une réunion</value>
+  </data>
+  <data name="MeetingStart" xml:space="preserve">
+    <value>Début</value>
+  </data>
+  <data name="MeetingEnd" xml:space="preserve">
+    <value>Fin</value>
+  </data>
+  <data name="MeetingLocation" xml:space="preserve">
+    <value>Lieu</value>
+  </data>
+  <data name="MeetingOrganizer" xml:space="preserve">
+    <value>Organisateur</value>
+  </data>
+  <data name="MeetingAttendees" xml:space="preserve">
+    <value>Participants</value>
+  </data>
+  <data name="MeetingDescription" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="AcknowledgeFailures" xml:space="preserve">
+    <value>Reconnaître les échecs</value>
+  </data>
+  <data name="AcknowledgeFailuresConfirm" xml:space="preserve">
+    <value>Cela avancera l'horodatage de synchronisation à l'heure d'achèvement de ce travail, donc la prochaine synchronisation sera une synchronisation incrémentale normale. Les e-mails échoués ne seront pas réessayés. Continuer ?</value>
+  </data>
+  <data name="AcknowledgeFailuresSuccess" xml:space="preserve">
+    <value>L'horodatage de synchronisation a été avancé. La prochaine synchronisation sera incrémentale.</value>
+  </data>
+  <data name="FailuresAcknowledged" xml:space="preserve">
+    <value>Échecs reconnus</value>
   </data>
 </root>

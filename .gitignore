@@ -294,6 +294,7 @@ coverage/
 /obj
 *.cache
 *.sln
+!MailArchiver.sln
 /ResXManager.config.xml
 update_resource_files.ps1
 *.cache
@@ -303,3 +304,4 @@ update_resource_files.ps1
 nextrelease.md
 .gitignore
 AGENTS.md
+MailArchiver.sln

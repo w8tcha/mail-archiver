@@ -189,9 +189,6 @@
   <data name="NoEmailsFoundText" xml:space="preserve">
     <value>A megadott keresési feltételeknek nem felel meg egyetlen e-mail sem.</value>
   </data>
-  <data name="ExportSearchResults" xml:space="preserve">
-    <value>Keresési Eredmények Exportálása</value>
-  </data>
   <data name="ExportFormat" xml:space="preserve">
     <value>Exportálási Formátum</value>
   </data>
@@ -269,6 +266,9 @@
   </data>
   <data name="Storage" xml:space="preserve">
     <value>Tárhely</value>
+  </data>
+  <data name="DatabaseStorage" xml:space="preserve">
+    <value>Adatbázis mérete</value>
   </data>
   <data name="EmailsPerMonth" xml:space="preserve">
     <value>E-mailek Havonta</value>
@@ -2531,6 +2531,12 @@
   <data name="SyncCancel" xml:space="preserve">
     <value>Szinkronizálás megszakítva</value>
   </data>
+  <data name="DeletionPolicy" xml:space="preserve">
+    <value>Törlési házirend</value>
+  </data>
+  <data name="DeletionDisabledMessage" xml:space="preserve">
+    <value>Az e-mailek törlése a konfiguráció által letiltva.</value>
+  </data>
   <data name="ConfirmBatchDelete" xml:space="preserve">
     <value>Kötegyes törlés megerősítése</value>
   </data>
@@ -3058,5 +3064,108 @@
   </data>
   <data name="ImportAccountsHeader" xml:space="preserve">
     <value>Fiókok importálása</value>
+  </data>
+  <!-- API Keys (read-only REST API) -->
+  <data name="ApiKeys" xml:space="preserve">
+    <value>API-kulcsok</value>
+  </data>
+  <data name="ApiKeysDescription" xml:space="preserve">
+    <value>API-kulcsok kezelése az archivált levelek programozott, csak olvasható eléréséhez.</value>
+  </data>
+  <data name="CreateApiKey" xml:space="preserve">
+    <value>API-kulcs létrehozása</value>
+  </data>
+  <data name="ApiKeyName" xml:space="preserve">
+    <value>Név</value>
+  </data>
+  <data name="ApiKeyExpiration" xml:space="preserve">
+    <value>Lejárat (opcionális)</value>
+  </data>
+  <data name="ApiKeyCreatedOnce" xml:space="preserve">
+    <value>Másolja ki ezt a kulcsot most. Biztonsági okokból csak egyszer jelenik meg, és később nem kérhető le.</value>
+  </data>
+  <data name="ApiKeyValue" xml:space="preserve">
+    <value>API-kulcs</value>
+  </data>
+  <data name="ApiKeyPrefix" xml:space="preserve">
+    <value>Előtag</value>
+  </data>
+  <data name="ApiKeyCreatedColumn" xml:space="preserve">
+    <value>Létrehozva</value>
+  </data>
+  <data name="ApiKeyLastUsed" xml:space="preserve">
+    <value>Utoljára használva</value>
+  </data>
+  <data name="ApiKeyExpires" xml:space="preserve">
+    <value>Lejár</value>
+  </data>
+  <data name="ApiKeyStatus" xml:space="preserve">
+    <value>Állapot</value>
+  </data>
+  <data name="ApiKeyActive" xml:space="preserve">
+    <value>Aktív</value>
+  </data>
+  <data name="ApiKeyRevoked" xml:space="preserve">
+    <value>Visszavonva</value>
+  </data>
+  <data name="ApiKeyExpired" xml:space="preserve">
+    <value>Lejárt</value>
+  </data>
+  <data name="ApiKeyRevoke" xml:space="preserve">
+    <value>Visszavonás</value>
+  </data>
+  <data name="ApiKeyRevokeConfirm" xml:space="preserve">
+    <value>Visszavonja ezt az API-kulcsot? Az ezt használó alkalmazások azonnal leállnak.</value>
+  </data>
+  <data name="ApiKeyOwner" xml:space="preserve">
+    <value>Tulajdonos</value>
+  </data>
+  <data name="NoApiKeys" xml:space="preserve">
+    <value>Még nincsenek API-kulcsok.</value>
+  </data>
+  <data name="ApiKeyCreatedSuccess" xml:space="preserve">
+    <value>API-kulcs létrehozva.</value>
+  </data>
+  <data name="ApiKeyRevokedSuccess" xml:space="preserve">
+    <value>API-kulcs visszavonva.</value>
+  </data>
+  <data name="ApiKeyRevokeFailed" xml:space="preserve">
+    <value>Nem sikerült visszavonni az API-kulcsot.</value>
+  </data>
+  <data name="Copy" xml:space="preserve">
+    <value>Másolás</value>
+  </data>
+  <data name="MeetingInvitation" xml:space="preserve">
+    <value>Értekezlet-meghívás</value>
+  </data>
+  <data name="MeetingStart" xml:space="preserve">
+    <value>Kezdés</value>
+  </data>
+  <data name="MeetingEnd" xml:space="preserve">
+    <value>Befejezés</value>
+  </data>
+  <data name="MeetingLocation" xml:space="preserve">
+    <value>Helyszín</value>
+  </data>
+  <data name="MeetingOrganizer" xml:space="preserve">
+    <value>Szervező</value>
+  </data>
+  <data name="MeetingAttendees" xml:space="preserve">
+    <value>Résztvevők</value>
+  </data>
+  <data name="MeetingDescription" xml:space="preserve">
+    <value>Leírás</value>
+  </data>
+  <data name="AcknowledgeFailures" xml:space="preserve">
+    <value>Hibák elismerése</value>
+  </data>
+  <data name="AcknowledgeFailuresConfirm" xml:space="preserve">
+    <value>Ez előreviszi a szinkronizálási időbélyeget a feladat befejezési idejére, így a következő szinkronizálás normál növekményes szinkronizálás lesz. A sikertelen e-mailek nem lesznek újrapróbálva. Folytatja?</value>
+  </data>
+  <data name="AcknowledgeFailuresSuccess" xml:space="preserve">
+    <value>A szinkronizálási időbélyeg előre lett állítva. A következő szinkronizálás növekményes lesz.</value>
+  </data>
+  <data name="FailuresAcknowledged" xml:space="preserve">
+    <value>Hibák elismerve</value>
   </data>
 </root>

@@ -33,6 +33,14 @@ services:
       - Authentication__CookieName=MailArchiverAuth
       - Authentication__CookieSameSite=Lax
 
+      # REST API Settings (read-only, disabled by default)
+      - Api__Enabled=false
+      - Api__AllowAttachmentDownloads=true
+      - Api__EnableSwaggerUi=true
+      - Api__DefaultPageSize=20
+      - Api__MaxPageSize=100
+      - Api__RateLimitPerMinute=120
+
       # MailSync Settings
       - MailSync__IntervalMinutes=15
       - MailSync__TimeoutMinutes=60
@@ -87,6 +95,9 @@ services:
       # CSV Import Settings (for bulk IMAP account import)
       - CsvImport__MaxRows=5000
       - CsvImport__MaxFileSizeBytes=10000000
+
+      # Deletion Policy Settings (Optional - controls whether email deletion is allowed)
+      - DeletionPolicy__DeletionAllowed=true
 
       # TimeZone Settings
       - TimeZone__DisplayTimeZoneId=Etc/UCT
@@ -213,7 +224,16 @@ docker compose restart
   - `Strict` (default): Maximum security. Cookies are only sent with same-site requests. This may cause issues when navigating to the application from external links (e.g., clicking a link from another website), as the existing session won't be recognized.
   - `Lax`: Recommended when using a reverse proxy. Cookies are sent with top-level navigations and same-site requests, allowing users to follow external links to the application while maintaining CSRF protection for POST requests.
   - `None`: Cookies are sent with all requests. Requires HTTPS and the `Secure` attribute. Only use this if you have specific cross-site requirements and understand the security implications.
-  
+
+### 🔌 REST API Settings
+The optional read-only REST API is **disabled by default**. See the [REST API guide](API.md) for the full reference.
+- `Api__Enabled`: Master switch for the read-only REST API (default `false`). When `false`, all `/api/*` routes return `404`.
+- `Api__AllowAttachmentDownloads`: Allow downloading attachment bytes through the API (default `true`). When `false`, the attachment endpoint returns `403`.
+- `Api__EnableSwaggerUi`: Expose Swagger UI at `/apidocs` and the OpenAPI document at `/apidocs/spec/v1.json` (default `true`). Both require a logged-in browser session.
+- `Api__DefaultPageSize`: Default page size for list endpoints when not specified (default `20`).
+- `Api__MaxPageSize`: Maximum allowed page size; larger requests are clamped (default `100`).
+- `Api__RateLimitPerMinute`: Fixed-window request budget per API key per minute (default `120`).
+
 ### 📨 MailSync Settings
 - `MailSync__IntervalMinutes`: The interval in minutes between email synchronization. This is the global default; each account can override it individually from the Create/Edit page (leave empty to use this default).
 - `MailSync__FullSyncIntervalHours`: Optional global default for automatic full resyncs, in hours. When unset (the default), no automatic full sync runs unless a per-account `FullSyncIntervalHours` value is set on the Create/Edit page. Per-account values override this global default.
@@ -292,6 +312,15 @@ docker compose restart
 - `CsvImport__MaxRows`: Maximum number of CSV rows (mailboxes) processed in a single bulk import. Default is `5000`. Increase this value for very large deployments; lower it to limit the impact of a single import run on database load.
 - `CsvImport__MaxFileSizeBytes`: Maximum allowed size (in bytes) of the uploaded CSV file. Default is `10000000` (10 MB). Adjust this value to match your upload limits if needed.
 - See [Account Import Guide](Account%20Import.md) for detailed usage instructions on bulk IMAP account import via CSV.
+
+### 🔒 Deletion Policy Settings
+- `DeletionPolicy__DeletionAllowed`: Controls whether manual deletion of archived emails is allowed (true/false). Default is `true`. When set to `false`:
+  - All archived emails are locked (`IsLocked = true`) on startup via the database compliance trigger, preventing any modification or deletion at the database level.
+  - Manual deletion (single and bulk) is blocked on the application level with an error message.
+  - The column default is adjusted so that newly imported emails are also locked.
+  - The current policy state is logged to the AccessLogs table on every startup (visible on the Logs page as "Deletion Policy" entries) for auditability.
+  - Local retention deletion is exempt: emails that fall under a configured retention period are still deleted (they are unlocked immediately before deletion within the retention process).
+- **Immutability protection:** When `IsLocked = true`, the database compliance trigger (`prevent_locked_email_changes`) blocks ANY modification to the email row — all columns are protected, not just a fixed field list. The only exempt columns are `IsLocked` itself (so that unlocking for retention deletion and startup policy application remains possible) and `FolderName` (so that IMAP sync can update the folder when an email is moved server-side). The protection is column-agnostic (JSONB-based comparison) and automatically covers future schema additions.
 
 ### 🕐 TimeZone Settings
 - `TimeZone__DisplayTimeZoneId`: The time zone used for displaying email timestamps in the UI. Uses IANA time zone identifiers (e.g., "Europe/Berlin", "Asia/Tokyo"). Default is "Etc/UCT" for backward compatibility. When importing emails timestamps will be converted to this time zone for display purposes.
